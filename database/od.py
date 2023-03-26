@@ -3,6 +3,11 @@ from bs4 import BeautifulSoup as soup
 import logging as log
 import httpx
 import asyncio
+try:
+    from alive_progress import alive_bar
+    hasbar=True
+except ImportError:
+    hasbar=False
 
 log.basicConfig(level=log.DEBUG)
 RATE_LIMIT = 5
@@ -23,6 +28,9 @@ class OpenDirectory():
 
     
     async def request(self):
+        """
+        This method sends the http request
+        """
         log.debug("Starting HTTP request")
         # Retreive cached http request if present
         if self.__data != None:
@@ -37,6 +45,9 @@ class OpenDirectory():
 
 
     async def soup(self):
+        """
+        This method returns the html parser. It calls the request function
+        """
         log.debug("Creating soup")
         r = await self.request()
         if not self.__soup:
@@ -67,11 +78,7 @@ class OpenDirectory():
         log.debug(f"Found files: {self.__files}")
 
     
-    async def download_all(self):
-        # Queue up some tasks for everything
-        await asyncio.gather(*[self.__download(file) for file in self.__files])
-
-    async def __download(self, link:str):
+    async def download_file(self, link:str):
         # This gets the basename of the link
         output = unquote(urlparse(link).path.split("/")[-1])
         # Semaphores ensure the jobs do not exceed the size specified by the semaphore
@@ -80,18 +87,57 @@ class OpenDirectory():
             client = httpx.AsyncClient()
             async with client.stream('GET', f"{link}") as response:
                 log.debug(f"Attempting to download file: {output}")
+                size = int(response.headers.get("Content-Length"))
                 # This is the ~magic~!
-                with open(output, 'wb') as f:
-                    async for chunk in response.aiter_bytes():
-                        f.write(chunk)
+                if hasbar:
+                    with open(output, 'wb') as f, alive_bar(size) as bar:
+                        async for chunk in response.aiter_bytes():
+                            bar(f.write(chunk))
+                else:
+                    with open(output, 'wb') as f:
+                        async for chunk in response.aiter_bytes():
+                            f.write(chunk)
+                log.debug(f"Finished downloading file {output}")
             await client.aclose()
+
+
+    async def download_files(self):
+        """
+        Downloads all files in given directory's folder
+        """
+        # Queue up some tasks for everything
+        await asyncio.gather(*[self.download_file(file) for file in self.__files])
+
+
+    async def download_folder(self, d):
+        """
+        Downloads a folder
+        """
+        if not isinstance(d, OpenDirectory):
+            return
+        await d.fetch()
+        tasks = [d.download_files()]
+        tasks += [d.__download_folder(folder, tasks) for folder in d.__folders] 
+        await asyncio.gather(*tasks)
+
+
+    async def __download_folder(self, d, tasks):
+        """
+        A helper method that creates tasks for subdirectories
+        """
+        if not isinstance(d, OpenDirectory):
+            return
+        await d.fetch()
+        tasks += [d.__download_folder(folder, tasks) for folder in d.__folders]
+        return tasks
+
 
 async def main(): 
     link = "https://wii.joshw.info/"
     link = "https://nsf.joshw.info/0-9/"
     d = OpenDirectory(link)
     await d.fetch()
-    await d.download_all()
+    await d.download_files()
 
 if __name__ == "__main__":
     asyncio.run(main())
