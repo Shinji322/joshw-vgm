@@ -1,16 +1,19 @@
-from urllib.parse import urlparse, unquote
+from utils import basename
 from bs4 import BeautifulSoup as soup
 import logging as log
 import httpx
 import asyncio
+
 try:
     from alive_progress import alive_bar
     hasbar=True
 except ImportError:
     hasbar=False
 
+
 log.basicConfig(level=log.DEBUG)
 RATE_LIMIT = 5
+
 
 class OpenDirectory():
     __data = None
@@ -26,21 +29,29 @@ class OpenDirectory():
         log.debug(f"Creating OpenDirectory({link})")
         self.link = link
 
-    
+
+    def has_folders(self) -> bool:
+        return len(self.__folders) > 1
+
+    def __str__(self) -> str:
+        return self.link
+
+
     async def request(self):
         """
         This method sends the http request
         """
-        log.debug("Starting HTTP request")
+        log.debug(f"Starting HTTP request to {self}")
         # Retreive cached http request if present
-        if self.__data != None:
-            return self.__data
-        # Asynchronously make a request
-        async with httpx.AsyncClient() as client:
-            self.__data = await client.get(self.link, headers=self.headers)
-        if self.__data.status_code != 200:
-            log.fatal(f"Couldn't retreive data: {self.__data}")
-        log.debug(f"Retreived data: {self.__data}")
+        async with self.__semaphore:
+            if self.__data != None:
+                return self.__data
+            # Asynchronously make a request
+            async with httpx.AsyncClient() as client:
+                self.__data = await client.get(self.link, headers=self.headers)
+            if self.__data.status_code != 200:
+                log.fatal(f"Couldn't retreive data: {self.__data}")
+            log.debug(f"Retreived data: {self.__data}")
         return self.__data
 
 
@@ -70,7 +81,7 @@ class OpenDirectory():
                 continue
             # If the file is a directory
             if file.endswith('/'):
-                self.__folders.append(f"{self.link}{file}")
+                self.__folders.append(OpenDirectory(f"{self.link}{file}"))
             # If this is a file
             elif file.endswith(self.extensions):
                 self.__files.append(f"{self.link}{file}")
@@ -80,7 +91,7 @@ class OpenDirectory():
     
     async def download_file(self, link:str):
         # This gets the basename of the link
-        output = unquote(urlparse(link).path.split("/")[-1])
+        output = basename(link)
         # Semaphores ensure the jobs do not exceed the size specified by the semaphore
         async with self.__semaphore:
             log.debug(f"Downloading file: {link} to {output}")
@@ -109,15 +120,22 @@ class OpenDirectory():
         await asyncio.gather(*[self.download_file(file) for file in self.__files])
 
 
-    async def download_folder(self, d):
+    async def download_folders(self):
         """
         Downloads a folder
         """
-        if not isinstance(d, OpenDirectory):
-            return
-        await d.fetch()
-        tasks = [d.download_files()]
-        tasks += [d.__download_folder(folder, tasks) for folder in d.__folders] 
+        log.debug(f"Beginning download of folder: {self.link}")
+        await self.fetch()
+        tasks = [self.download_file(file) for file in self.__files]
+        try:
+            # I need to do some sort of asynchronous recursion here that i'm not smart enough to do right now
+            for folder in self.__folders:
+                tasks += [folder.download_file(f) for f in folder.__files]
+                tasks += [folder.queue(f) for f in folder.__folders]
+            # while f has folders, add their download files tasks to the task queue
+        except IndexError:
+            pass
+        log.debug(f"Tasks: {tasks}")
         await asyncio.gather(*tasks)
 
 
@@ -131,13 +149,37 @@ class OpenDirectory():
         tasks += [d.__download_folder(folder, tasks) for folder in d.__folders]
         return tasks
 
+    def get_files(self):
+        return self.__files
+
+
+    async def get_all_files(self):
+        await self.fetch()
+        files = list(self.__files)
+
+        tasks = [d.request() for d in self.__folders]
+        await asyncio.gather(*tasks)
+
+        tasks = [d.fetch() for d in self.__folders]
+        await asyncio.gather(*tasks)
+
+        files.extend([d.__files for d in self.__folders])
+
+        return files
+
+
+    def get_folders(self):
+        return self.__folders
+
 
 async def main(): 
-    link = "https://wii.joshw.info/"
-    link = "https://nsf.joshw.info/0-9/"
+    #link = "https://wii.joshw.info/"
+    #link = "https://nsf.joshw.info/0-9/"
+    link = "https://nsf.joshw.info/"
     d = OpenDirectory(link)
     await d.fetch()
-    await d.download_files()
+    #await d.download_files()
+    #await d.download_folders()
 
 if __name__ == "__main__":
     asyncio.run(main())
