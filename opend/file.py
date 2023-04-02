@@ -27,7 +27,7 @@ class File:
 
     @property
     def basename(self) -> str:
-        return self.name
+        return unq(self.name)
 
 
 

@@ -1,4 +1,4 @@
-from file import File
+from opend.file import File
 from typing import List
 from utils import unq
 from bs4 import BeautifulSoup as soup
