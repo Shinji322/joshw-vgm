@@ -1,40 +1,27 @@
+from file import File
 from typing import List
-from utils import basename, unq
+from utils import unq
 from bs4 import BeautifulSoup as soup
 import logging as log
 import httpx
 import asyncio
 
-try:
-    from alive_progress import alive_bar
-    hasbar=True
-except ImportError:
-    hasbar=False
-
-
 log.basicConfig(level=log.DEBUG)
 
 
-class OpenDirectory():
-    __data: httpx.Response = None # pyright: ignore
-    __soup: soup = None # pyright: ignore
-    __folders: List['OpenDirectory']
-    __files: List[str]
+class OpenDirectory:
     headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36" }
     extensions = ('7z', 'mp3', 'ogg', 'opus')
 
 
-    def __init__(self, link:str, RATE_LIMIT=10) -> None:
+    def __init__(self, link:str, limit=10) -> None:
         self.link = link
-        self.__semaphore = asyncio.Semaphore(RATE_LIMIT)
-        self.__folders = list()
-        self.__files = list()
+        self.__semaphore = asyncio.Semaphore(limit)
+        self.__data: httpx.Response = None # pyright: ignore
+        self.__soup: soup = None # pyright: ignore
+        self.__folders: List['OpenDirectory'] = list()
+        self.__files: List[File] = list()
 
-
-    def has_folders(self) -> bool:
-        for _ in self.__folders:
-            return True
-        return False
 
     def __str__(self) -> str:
         return self.link
@@ -69,9 +56,9 @@ class OpenDirectory():
 
     async def fetch(self):
         """
-        This method fetches metadata from the current folder
+        This method scrapes the http request for hyperlinks
+            It will either use the cached http request or call the http request
         """
-        log.debug("Fetching data from soup")
         soup = await self.soup()
         for f in soup.select("pre a"):
             # These are top header fields
@@ -84,76 +71,28 @@ class OpenDirectory():
                 continue
 
             # If the file is a directory
-            if file.endswith('/'):
+            if file.endswith('/'): # pyright: ignore 
                 self.__folders.append(OpenDirectory(f"{self.link}{file}"))
             # If this is a file
-            elif file.endswith(self.extensions):
-                self.__files.append(f"{self.link}{file}")
+            elif file.endswith(self.extensions): # pyright: ignore 
+                self.__files.append(File(f"{self.link}{file}"))
         log.debug(f"Found folders: {self.__folders}")
         log.debug(f"Found files: {self.__files}")
 
-    
-    async def download_file(self, link:str):
-        output = basename(link)
-        async with self.__semaphore:
-            log.debug(f"Downloading file: {link} to {output}")
-            client = httpx.AsyncClient()
-            async with client.stream('GET', f"{link}") as response:
-                log.debug(f"Attempting to download file: {output}")
-                size = int(response.headers.get("Content-Length"))
-                # This is the ~magic~!
-                if hasbar:
-                    with open(output, 'wb') as f, alive_bar(size) as bar:
-                        async for chunk in response.aiter_bytes():
-                            bar(f.write(chunk))
-                else:
-                    with open(output, 'wb') as f:
-                        async for chunk in response.aiter_bytes():
-                            f.write(chunk)
-                log.debug(f"Finished downloading file {output}")
-            await client.aclose()
 
-
-    async def download_files(self):
+    async def download_tasks(self):
         """
-        Downloads all files in given directory's folder
+        Returns a list of the desired tasks
         """
-        # Queue up some tasks for everything
-        await asyncio.gather(*[self.download_file(file) for file in self.__files])
-
-
-    async def download_folder(self):
-        """
-        Downloads an entire folder
-        """
-        log.debug(f"Beginning download of folder: {self.link}")
         await self.fetch()
-        tasks = [self.download_file(file) for file in self.__files]
-        try:
-            # I need to do some sort of asynchronous recursion here that i'm not smart enough to do right now
-            for folder in self.__folders:
-                tasks += [folder.download_file(f) for f in folder.__files]
-                tasks += [folder.queue(f) for f in folder.__folders]
-            # while f has folders, add their download files tasks to the task queue
-        except IndexError:
-            pass
-        log.debug(f"Tasks: {tasks}")
-        await asyncio.gather(*tasks)
-
-
-    async def __download_folder(self, d: 'OpenDirectory', tasks):
-        """
-        A helper method that creates tasks for subdirectories
-        """
-        await d.fetch()
-        tasks += [d.__download_folder(folder, tasks) for folder in d.__folders]
+        tasks = [d.fetch() for d in self.__folders]
         return tasks
 
-    def get_files(self):
-        return self.__files
 
-
-    async def get_all_files(self):
+    async def files(self):
+        """
+        Returns a list containing all the urls to all files
+        """
         await self.fetch()
         files = list(self.__files)
 
