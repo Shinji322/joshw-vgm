@@ -19,7 +19,7 @@ class Downloader:
         self.__semaphore = asyncio.Semaphore(limit)
 
 
-    async def file(self, file:File, output:str=None): # pyright: ignore 
+    async def file(self, file: File, output: str=None): # pyright: ignore 
         if output is None:
             output = file.basename
         async with self.__semaphore:

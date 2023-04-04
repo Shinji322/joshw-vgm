@@ -1,9 +1,10 @@
-from sqlalchemy import Integer, String, Column
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import Integer, String, Column
+from sqlalchemy import create_engine
 from opend import OpenDirectory
 from opend.file import File
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from config import DB_FILE
 import json
 
 
@@ -12,30 +13,44 @@ class Base(DeclarativeBase):
 
 
 class Game(Base):
-    __tablename__ = "Console"
+    __tablename__ = 'Games'
 
     id = Column('id', Integer, primary_key=True)
     link = Column('link', String)
-    filename = Column('filename', String)
+    name = Column('name', String)
     console = Column('console', String)
 
     def __init__(self, f: File, console: str) -> None:
         self.link = f.fullname
-        self.filename = f.basename
+        self.name = f.basename
         self.console = console
 
     def __repr__(self) -> str:
-        return f"Game(id={self.id}, filename={self.filename})"
+        return f"Game(id={self.id}, filename={self.name})"
 
     def __hash__(self) -> int:
-        return hash(f"{self.filename} {self.link} {self.console}")
+        return hash(f"{self.name} {self.link} {self.console}")
 
 
-async def build(links='assets/links.json', db='games.db'):
-    engine = create_engine(f"sqlite:///{db}", echo=True)
-    Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
+# A helper class to wrap my bad code
+class SQLEngine:
+    def __init__(self, db=DB_FILE) -> None:
+        self.db = db
+        self.__init_engine()
+
+
+    def __init_engine(self):
+        self.engine = create_engine(f"sqlite:///{self.db}", echo=True)
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+
+
+    def make_session(self):
+        return self.Session()
+
+
+async def build(links='assets/links.json', db=DB_FILE):
+    session = SQLEngine(db).make_session()
 
     with open(links) as f:
         data = json.load(f)

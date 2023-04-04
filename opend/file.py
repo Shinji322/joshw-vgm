@@ -15,7 +15,7 @@ class File:
         """
         Returns the full filepath
         """
-        return str(self.path.absolute())
+        return str(self.path)
 
 
     @property
@@ -28,7 +28,6 @@ class File:
     @property
     def basename(self) -> str:
         return unq(self.name)
-
 
 
     @property
@@ -64,7 +63,7 @@ class File:
 
 def main():
     f = File("https://usf.joshw.info/b/Bakuretsu Muteki Bangai-O (1999-09-03)(Treasure)(ESP)[N64].7z")
-    print(f.tree(-2))
+    print(f.fullname)
 
 
 if __name__ == "__main__":
