@@ -1,11 +1,13 @@
 from db import build
 from opend.downloader import Downloader
 from opend.file import File
-from search.game import search, fzf_search_db, fzf_query_consoles
+from search.query import Query, FZF
 from argparse import ArgumentParser
+import logging as log
 import asyncio
 import sys
 
+log.disable(log.CRITICAL)
 
 async def main():
     """
@@ -17,19 +19,21 @@ async def main():
     p.add_argument('-s', '--search', help='query the database', nargs=1)
     p.add_argument('-f', '--fuzz', help='fuzzy search the database', action='store_true')
     args = p.parse_args()
-    if len(sys.argv[1:]) < 0:
-        console = fzf_query_consoles()
+    if len(sys.argv[1:]) <= 0:
+        console = FZF.consoles()
+        FZF.consoles(Query.console(console))
 
     if args.build:
         await build()
     if args.search:
-        print(search(args.search))
+        Query.name(args.search)
     if args.fuzz:
-        game = fzf_search_db()
+        game = FZF.search()
         if game is None:
             exit(1)
-        if input(f"Should I download '{game}'? [y/N]") == "y":
+        if input(f"Should I download '{game}'? [y/N] ") == "y":
             d = Downloader()
+            print(f"Downloading: {game}")
             await d.file(File(game.link))
 
 if __name__ == "__main__":

@@ -5,6 +5,9 @@ from opend.file import File
 from config import DB_FILE
 import json
 
+f = File(DB_FILE)
+if not f.exists():
+    f.touch()
 engine = create_engine(f"sqlite:///{DB_FILE}", echo=True)
 
 
@@ -15,7 +18,7 @@ class Game(SQLModel, table=True):
     console: str
 
     def __init__(self, f: File, console: str) -> None:
-        self.link = f.fullname
+        self.link = f.url
         self.name = f.basename
         self.console = console
 

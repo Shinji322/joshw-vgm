@@ -3,7 +3,6 @@ from opend import OpenDirectory
 from opend.file import File
 import asyncio
 import httpx
-import logging as log
 try:
     from alive_progress import alive_bar
     hasbar=True
@@ -21,7 +20,9 @@ class Downloader:
 
     async def file(self, file: File, output: str=None): # pyright: ignore 
         if output is None:
-            output = file.basename
+            output = file.filename
+        if not file.path.exists():
+            file.touch()
         async with self.__semaphore:
             client = httpx.AsyncClient()
             async with client.stream('GET', f"{file}") as response:
@@ -35,7 +36,6 @@ class Downloader:
                     with open(output, 'wb') as f:
                         async for chunk in response.aiter_bytes():
                             f.write(chunk)
-                log.debug(f"Finished downloading file {output}")
             await client.aclose()
 
 
